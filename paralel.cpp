@@ -49,11 +49,12 @@ int main(int argc, char **argv) try{
   } 
   else {
     if(rank == 0)
-        std::printf("sequential solver------------------------------------------------------------\n");
+        std::printf("1D decomp solver------------------------------------------------------------\n");
     // sequential(opts);
   }
 
   if (rank == 0){
+    cout<<"Paralel terminated\n";
     auto end1 = std::chrono::system_clock::now();
     auto runtime1 = std::chrono::duration_cast<std::chrono::milliseconds>(end1 - start1); //runtime with init
     std::cout << "The program executed in " << runtime1.count() << " milliseconds." << std::endl;
