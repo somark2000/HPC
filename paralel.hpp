@@ -24,7 +24,9 @@ namespace program_options {
     size_t M;
     size_t iters;
     // unsigned int reorder;
-    //TODO: scaling options, chance of alive, 
+    // unsigned int scaling;
+    // float chance;
+    // unsigned int verification;
 
     void print() const {
       std::printf("mpi_mode: %u\n", mpi_mode);    
@@ -33,6 +35,9 @@ namespace program_options {
       std::printf("M: %zu\n", M);
       std::printf("iters: %zu\n", iters);
     //   std::printf("reoder: %u\n", reorder);
+    //   std::printf("scaling: %u\n", scaling);
+    //   std::printf("chance of alive: %u\n", chance);
+    //   std::printf("verification: %u\n", verification);
     }
   };
 
@@ -53,8 +58,24 @@ namespace program_options {
       throw std::runtime_error("invalid parameter for M");
     if (std::sscanf(argv[5], "%zu", &opts.iters) != 1 && opts.iters != 0)
       throw std::runtime_error("invalid parameter for iters");
-    // if (std::sscanf(argv[6], "%u", &opts.reorder) == 1 || opts.reorder == 0)
+    // if (std::sscanf(argv[6], "%u", &opts.reorder) != 1 && opts.reorder != 0)
     //     throw std::runtime_error("invalid parameter for reorder flag (valid are 0 and 1) and recieved");
+    // if (std::string(argv[7]) == std::string("off"))
+    //   opts.scaling = 0;
+    // else if( std::string(argv[7]) == std::string("strong"))
+    //   opts.scaling = 1;
+    // else if( std::string(argv[7]) == std::string("weak"))
+    //   opts.scaling = 2;
+    // else
+    // throw std::runtime_error("invalid parameter for scaling (valid are 'off', 'strong' and 'weak')");
+    // if (std::sscanf(argv[8], "%zu", &opts.chance) > 1 && opts.chance < 0)
+    //   throw std::runtime_error("invalid parameter for chance of alive");
+    // if (std::string(argv[9]) == std::string("off"))
+    //   opts.verification = 0;
+    // else if( std::string(argv[9]) == std::string("on"))
+    //   opts.verification = 1;
+    // else
+    // throw std::runtime_error("invalid parameter for verification (valid are 'off' and 'on')");
     return opts;
   }
 
@@ -72,6 +93,16 @@ char Stensil(int nx, int ny, Matrix &M, int i, int j){
     int survive = (M[i][j]-'0')*(sum==2 || sum==3) + ('1'-M[i][j])*(sum==3);
     // cout<<"sunt in stensil\t survive="<<survive<<"\t sum="<<sum<<"\n";
     return '0' + survive;
+}
+
+void PrintOutput(int nx, int ny, Matrix M, int rank){
+    int contor = 0;
+    for (int i = 0; i < nx; i++)
+        for (int j = 0; j < nx; j++)
+            contor += M[i][j] - '0';
+    cout<<"for rank "<<rank<<" we have\n";
+    cout << contor << " x 1" << endl;
+    cout << (nx * ny - contor) << " x 0" << endl;
 }
 
 // return number of cols and rows in a subdomain characterized by (cartesian) coordinates
@@ -395,20 +426,10 @@ void  InputGenerator(int nx, int ny, Matrix &Matrix_Generated, Matrix &Matrix_Ne
     }
 }
 
-void PrintOutput(int nx, int ny, Matrix M){
-    int contor = 0;
-    for (int i = 0; i < nx; i++)
-        for (int j = 0; j < nx; j++)
-            contor += M[i][j] - '0';
-    cout << contor << " x 1" << endl;
-    cout << (nx * ny - contor) << " x 0" << endl;
-}
-
 //function that connects all the slices of the processes together in the end (for 2D)
-Matrix CollectData(Matrix Matrixx, int rank, int numprocesses, int N, int M, int row_div, int row_mod, int col_div, int col_mod,
+void CollectData(Matrix Matrixx, Matrix &result, int rank, int numprocesses, int N, int M, int row_div, int row_mod, int col_div, int col_mod,
     int r, int c, int N_row, int N_col, MPI_Comm comm_2d){
     MPI_Status status;
-    Matrix result;
     // char *Buffer = (char*)malloc(sizeof(char)*(row_div+1)*(col_div+1)); //maximum size that could appear
 
     //initialize 2d array to hold the recieved data
@@ -432,51 +453,62 @@ Matrix CollectData(Matrix Matrixx, int rank, int numprocesses, int N, int M, int
             int size = (N_row-4)*(N_col-4);
 
             MPI_Recv(Buffer, size, MPI_CHAR, i, 0, comm_2d, &status);
-            cout<<"recieved from rank "<<i<<"\n";
+            // cout<<"recieved from rank "<<i<<" "<<N_row<<" "<<N_col<<" "<<"\n";
             Matrix recieved;
+            recieved.resize(N_row);
+            for(int j=0;j<N_row;++j)
+                recieved[j].resize(N_col);
             //rebuild the matrix of the subdomain without the ghostlayers
-            for (int i = 0; i < N_row-4; i++){
-                for (int j = 0; j < N_col-4; j++){
-                    recieved[i][j] = Buffer[ (i)*(N_col-4) + (j) ];
+            for (int j = 0; j < N_row-4; j++){
+                for (int k = 0; k < N_col-4; k++){
+                    recieved[j][k] = Buffer[ (j)*(N_col-4) + (k) ];
                 }
             }
             data[rec_coords[1]][rec_coords[0]] = recieved;
+            // cout<<"recieved into matrix from rank "<<i<<" with size "<<N_row<<" "<<N_col<<" "<<size<<" data\n"<<std::string(Buffer,size)<<".\n";
             free(Buffer);
         }
-
         // build the final solution
         int rowoffset = 0;
         for(int i=0;i<r;i++){ //row of data
+            // cout<<"survived colletion\n";
             int maxrow = row_div; //number of rows in the current subdomain set
             if(i<row_mod) maxrow++;
-            rowoffset+=maxrow;
             for(int j=0;j<maxrow;j++){ //row of recieved
                 int coloffset = 0;
                 for(int k=0;k<c;k++){ //column of data
                     int maxcol = col_div; //number of rows in the current subdomain set
                     if(k<col_mod) maxcol++;
-                    coloffset+=maxcol;
                     for(int l=0;l<maxcol;l++){
-                        result[ i*rowoffset + j ][ k*coloffset + l ] = data[i][k][j][l];
+                        // cout<<"doing fun ind subdomains of row "<<i<<"and cols "<<k<<" of inner rows "<<j<<" and inner cols"<<l<<"\n";
+                        // cout<<"to be inserted at "<<rowoffset + j<<" "<<coloffset + l<<"\n";
+                        // cout<<"the data is "<< data[i][k][j][l] <<"\n";
+                        // cout<<"finished at "<<i<<" "<<k<<"\t and pos "<<j<<" "<<l<<"\n to be inserted at "<<rowoffset + j<<" "<<coloffset + l<<"\n" ;
+                        // data[i][k][j][l] = '0';
+                        // result[ rowoffset + j ][ coloffset + l ]='0';
+                        result[ rowoffset + j ][ coloffset + l ] = data[i][k][j][l];
                     }
+                    coloffset+=maxcol;
                 }
             }
+            rowoffset+=maxrow;
         }
     }
     else{
         char *Buffer = (char*)malloc(sizeof(char)*(N_row)*(N_col)); //maximum size that could appear
         // create a buffer with all the elements of the subdomain without the ghost layers
-        for (int i = 2; i < N_row-2; i++){
-            for (int j = 2; j < N_col-2; j++){
-                Buffer[ (i-2)*N_col + (j-2) ] = Matrixx[i][j];
+        for (int i = 0; i < N_row-4; i++){
+            for (int j = 0; j < N_col-4; j++){
+                Buffer[ i*(N_col-4) + j ] = Matrixx[i+2][j+2];
             }
         }
         int size = (N_row-4)*(N_col-4);
+        // cout<<"sent from rank "<<rank<<" with size "<<N_row<<" "<<N_col<<" "<<size<<" data\n"<<std::string(Buffer,size)<<".\n";
+        // printf("%.*s \n",size,Buffer);
         MPI_Send(Buffer,size, MPI_CHAR,0,0,comm_2d);
-        cout<<"sent from rank "<<rank<<"\n";
         free(Buffer);
     }
-    return result;
+    // return result;
 }
 
 int paralel(program_options::Options opts, int rank, int numprocesses){
@@ -528,7 +560,7 @@ int paralel(program_options::Options opts, int rank, int numprocesses){
 
     // number of columns and rows in this subdomain (with added ghost layers)
     std::tuple <int, int> rw_col = GetSubdomainDims(coord, row_div, row_mod, col_div, col_mod);
-    int N_col, N_row;
+    size_t N_col, N_row;
     N_col = std::get<0>(rw_col);
     N_row = std::get<1>(rw_col);
 
@@ -551,8 +583,14 @@ int paralel(program_options::Options opts, int rank, int numprocesses){
     
     Iterate(N_row, N_col, Matrix_Old, Matrix_New, opts.iters, rank, comm_2d,r,c);
     cout<<"Iteration of the domain "<< rank <<" successfull------------------------------------------------" << std::endl;
-    Matrix result = CollectData(Matrix_New,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
-    PrintOutput(opts.N, opts.M, result);
+    Matrix result;
+    result.resize(opts.N);
+    for(size_t i=0;i<opts.N;++i)
+        result[i].resize(opts.M);
+    CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
+    if (rank==0){
+        PrintOutput(opts.N, opts.M, result,0);
+    }
 
     return 0;
 }
