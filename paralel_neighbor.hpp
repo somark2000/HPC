@@ -19,10 +19,11 @@
 
 using namespace std;  
 
+//matrix for storing our cells
+typedef vector < vector < char > >  Matrix;
+
 namespace paraleln_solver{
 
-    //matrix for storing our cells
-    typedef vector < vector < char > >  Matrix;
 
     char Stensil(int nx, int ny, Matrix &M, int i, int j){
         // count all the alive neighbours 
@@ -100,7 +101,7 @@ namespace paraleln_solver{
     }
 
     void CreateGraphComm(int rank,int &rank_n, int &rank_s, int &rank_e, int &rank_w, int &rank_ne, int &rank_nw, int &rank_se, int &rank_sw,
-                        MPI_Comm comm_2d, MPI_Comm comm_graph, int r, int c){
+                        MPI_Comm comm_2d, MPI_Comm &comm_graph, int r, int c){
         // fint main neighbors
         MPI_Cart_shift(comm_2d, 1, 1, &rank_n, &rank_s); //dir 1 is Y
         MPI_Cart_shift(comm_2d, 0, 1, &rank_w, &rank_e); //dir 0 is X
@@ -137,7 +138,7 @@ namespace paraleln_solver{
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_sw);
 
         //create new communicator
-        int sources[1], degrees[1]; 
+        int sources[1],weights_s[1]; 
         int destinations[8], weights[8]; 
 
         /* get my main communication partners */ 
@@ -153,9 +154,8 @@ namespace paraleln_solver{
         destinations[7] = rank_nw; weights[7] = 1; 
         
         sources[0] = rank; 
-        degrees[0] = 8; 
-        MPI_Dist_graph_create(comm_2d, 1, sources, degrees, destinations, 
-                            weights, MPI_INFO_NULL, 0, &comm_graph); 
+        weights_s[0] = 2;
+        MPI_Dist_graph_create_adjacent(comm_2d, 1, sources, weights_s, 8, destinations, weights, MPI_INFO_NULL, 0, &comm_graph); 
     }
 
 
@@ -171,10 +171,10 @@ namespace paraleln_solver{
         char *Buffer2_e = (char*)malloc(sizeof(char)*MAX_DIM);
         char *Buffer1_w = (char*)malloc(sizeof(char)*MAX_DIM);
         char *Buffer2_w = (char*)malloc(sizeof(char)*MAX_DIM);
-        char *Buffer_sw = (char*)malloc(sizeof(char)*4);
-        char *Buffer_se = (char*)malloc(sizeof(char)*4);
-        char *Buffer_nw = (char*)malloc(sizeof(char)*4);
-        char *Buffer_ne = (char*)malloc(sizeof(char)*4);
+        char *Buffer_sw = (char*)malloc(sizeof(char)*9);
+        char *Buffer_se = (char*)malloc(sizeof(char)*9);
+        char *Buffer_nw = (char*)malloc(sizeof(char)*9);
+        char *Buffer_ne = (char*)malloc(sizeof(char)*9);
         
         // find neighbours
         int rank_n, rank_s, rank_e, rank_w;
@@ -206,7 +206,7 @@ namespace paraleln_solver{
         sdispls[0] = displacement;
         rdispls[0] = displacement;
         displacement += nx-4;
-        strcpy(Buffer_send,Buffer1_w);
+        strcpy(Buffer_send + displacement,Buffer1_w);
         displacement += nx-4;
         strcpy(Buffer_send + displacement,Buffer2_w);
         
@@ -221,7 +221,7 @@ namespace paraleln_solver{
         recvcounts[1] = 2*(ny-4);
         sdispls[1] = displacement;
         rdispls[1] = displacement;
-        strcpy(Buffer_send,Buffer1_s);
+        strcpy(Buffer_send + displacement,Buffer1_s);
         displacement += ny-4;
         strcpy(Buffer_send + displacement,Buffer2_s);
         displacement += ny-4;
@@ -237,7 +237,7 @@ namespace paraleln_solver{
         recvcounts[2] = 2*(nx-4);
         sdispls[2] = displacement;
         rdispls[2] = displacement;
-        strcpy(Buffer_send,Buffer1_e);
+        strcpy(Buffer_send + displacement,Buffer1_e);
         displacement += nx-4;
         strcpy(Buffer_send + displacement,Buffer2_e);
         displacement += nx-4;
@@ -253,7 +253,7 @@ namespace paraleln_solver{
         recvcounts[3] = 2*(ny-4);
         sdispls[3] = displacement;
         rdispls[3] = displacement;
-        strcpy(Buffer_send,Buffer1_n);
+        strcpy(Buffer_send + displacement,Buffer1_n);
         displacement += ny-4;
         strcpy(Buffer_send + displacement,Buffer2_n);
         displacement += ny-4;
@@ -268,7 +268,7 @@ namespace paraleln_solver{
         recvcounts[4] = 4;
         sdispls[4] = displacement;
         rdispls[4] = displacement;
-        strcpy(Buffer_send,Buffer_sw);
+        strcpy(Buffer_send + displacement,Buffer_sw);
         displacement += 4;
         // cout<<"preparing to sent south west from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
@@ -281,7 +281,7 @@ namespace paraleln_solver{
         recvcounts[5] = 4;
         sdispls[5] = displacement;
         rdispls[5] = displacement;
-        strcpy(Buffer_send,Buffer_se);
+        strcpy(Buffer_send + displacement,Buffer_se);
         displacement += 4;
         // cout<<"preparing to sent south east from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
@@ -294,7 +294,7 @@ namespace paraleln_solver{
         recvcounts[6] = 4;
         sdispls[6] = displacement;
         rdispls[6] = displacement;
-        strcpy(Buffer_send,Buffer_ne);
+        strcpy(Buffer_send + displacement,Buffer_ne);
         displacement += 4;
         // cout<<"preparing to sent north east from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
@@ -307,12 +307,14 @@ namespace paraleln_solver{
         recvcounts[7] = 4;
         sdispls[7] = displacement;
         rdispls[7] = displacement;
-        strcpy(Buffer_send,Buffer_nw);
+        strcpy(Buffer_send + displacement,Buffer_nw);
         displacement += 4; // end
         // cout<<"preparing to sent north west from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
         
+        cout<<"I am rank "<<rang<<" before comm\n";
         // Perform MPI_Alltoallv
-        MPI_Alltoallv(Buffer_send, sendcounts, sdispls, MPI_CHAR, Buffer_recv, recvcounts, rdispls, MPI_CHAR, comm_graph);
+        MPI_Neighbor_alltoallv(Buffer_send, sendcounts, sdispls, MPI_CHAR, Buffer_recv, recvcounts, rdispls, MPI_CHAR, comm_graph);
+        cout<<"I am rank "<<rang<<" after comm\n";
         
         
         // recieves start here
@@ -503,18 +505,18 @@ namespace paraleln_solver{
             Matrix_Old[i].resize(N_col);
         }
         InputGenerator(N_row, N_col, Matrix_Old, Matrix_New);
-        cout<<"Generation of the domain "<< rank <<" successfull------------------------------------------------" << std::endl;
+        cout<<"Generation of the domain "<< rank <<" successfull------------------------------------------------\n";
         
         Iterate(N_row, N_col, Matrix_Old, Matrix_New, opts.iters, rank, comm_2d,r,c);
-        cout<<"Iteration of the domain "<< rank <<" successfull------------------------------------------------" << std::endl;
-        // Matrix result;
-        // result.resize(opts.N);
-        // for(size_t i=0;i<opts.N;++i)
-        //     result[i].resize(opts.M);
-        // // CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
-        // if (rank==0){
-        //     PrintOutput(opts.N, opts.M, result,0);
-        // }
+        cout<<"Iteration of the domain "<< rank <<" successfull------------------------------------------------\n";
+        Matrix result;
+        result.resize(opts.N);
+        for(size_t i=0;i<opts.N;++i)
+            result[i].resize(opts.M);
+        // CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
+        if (rank==0){
+            PrintOutput(opts.N, opts.M, result,0);
+        }
 
         return 0;
     }
