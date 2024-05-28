@@ -47,7 +47,7 @@ int main(int argc, char **argv) try{
         std::printf("Sequential solver------------------------------------------------------------\n");
     sequential_solver::sequential(opts);
   }
-  else if (opts.mpi_mode == 2 && !check_prime(num_processes)){
+  else if (opts.mpi_mode == 2/* && !check_prime(num_processes)*/){
     if(rank == 0){
         opts.print();
         std::printf("2D paralel decomposition with %i subdomains----------------------------------\n", num_processes);

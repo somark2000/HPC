@@ -39,8 +39,10 @@ namespace paraleln_solver{
     void PrintOutput(int nx, int ny, Matrix M, int rank){
         int contor = 0;
         for (int i = 0; i < nx; i++)
-            for (int j = 0; j < nx; j++)
+            for (int j = 0; j < nx; j++){
+                if(M[i][j]!='0' and M[i][j]!='1') cout<<"problem at "<<i<<" "<<j<<" "<<(int)M[i][j]<<"\n";
                 contor += M[i][j] - '0';
+            }
         cout<<"for rank "<<rank<<" we have\n";
         cout << contor << " x 1" << endl;
         cout << (nx * ny - contor) << " x 0" << endl;
@@ -100,9 +102,11 @@ namespace paraleln_solver{
         }
     }
 
-    void CreateGraphComm(int rank,int &rank_n, int &rank_s, int &rank_e, int &rank_w, int &rank_ne, int &rank_nw, int &rank_se, int &rank_sw,
-                        MPI_Comm comm_2d, MPI_Comm &comm_graph, int r, int c){
-        // fint main neighbors
+    void CreateGraphComm(int rank, MPI_Comm comm_2d, MPI_Comm &comm_graph, int r, int c){
+        // find neighbours
+        int rank_n, rank_s, rank_e, rank_w;
+        int rank_ne, rank_nw, rank_se, rank_sw;
+        // find main neighbors
         MPI_Cart_shift(comm_2d, 1, 1, &rank_n, &rank_s); //dir 1 is Y
         MPI_Cart_shift(comm_2d, 0, 1, &rank_w, &rank_e); //dir 0 is X
         
@@ -118,48 +122,48 @@ namespace paraleln_solver{
         if(coord_corner[1] < 0) coord_corner[1]+=r;
         else if (coord_corner[1] > r) coord_corner[1]-=r;
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_sw);
-        coord_corner = {coord[0]+1, coord[1]-1};
-        if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
-        if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
-        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_ne);
         coord_corner = {coord[0]+1, coord[1]+1};
         if(coord_corner[0] < 0) coord_corner[0]+=c;
         else if (coord_corner[0] > c) coord_corner[0]-=c;
         if(coord_corner[1] < 0) coord_corner[1]+=r;
         else if (coord_corner[1] > r) coord_corner[1]-=r;
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_se);
-        coord_corner = {coord[0]-1, coord[1]+1};
+        coord_corner = {coord[0]+1, coord[1]-1};
         if(coord_corner[0] < 0) coord_corner[0]+=c;
         else if (coord_corner[0] > c) coord_corner[0]-=c;
         if(coord_corner[1] < 0) coord_corner[1]+=r;
         else if (coord_corner[1] > r) coord_corner[1]-=r;
-        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_sw);
-
+        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_ne);
+        coord_corner = {coord[0]-1, coord[1]-1};
+        if(coord_corner[0] < 0) coord_corner[0]+=c;
+        else if (coord_corner[0] > c) coord_corner[0]-=c;
+        if(coord_corner[1] < 0) coord_corner[1]+=r;
+        else if (coord_corner[1] > r) coord_corner[1]-=r;
+        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_nw);
+        // cout<<"I am rank "<<rank<<" and my friends are "<<rank_w<<" "<<rank_s<<" "<<rank_e<<" "<<rank_n<<" "<<rank_se<<" "<<rank_sw<<" "<<rank_ne<<" "<<rank_nw<<"\n";
         //create new communicator
-        int sources[1],weights_s[1]; 
-        int destinations[8], weights[8]; 
+        const int destinations[8] = {rank_w,rank_s,rank_e,rank_n,rank_se,rank_sw,rank_ne,rank_nw};
+        const int weights[8] ={2,2,2,2,1,1,1,1}; 
 
         /* get my main communication partners */ 
-        destinations[0] = rank_w; weights[0] = 2; 
-        destinations[1] = rank_s; weights[1] = 2; 
-        destinations[2] = rank_e; weights[2] = 2; 
-        destinations[3] = rank_n; weights[3] = 2; 
+        // destinations[0] = rank_w; weights[0] = 2; 
+        // destinations[1] = rank_s; weights[1] = 2; 
+        // destinations[2] = rank_e; weights[2] = 2; 
+        // destinations[3] = rank_n; weights[3] = 2; 
         
         /* get my communication partners along diagonals */ 
-        destinations[4] = rank_se; weights[4] = 1; 
-        destinations[5] = rank_sw; weights[5] = 1; 
-        destinations[6] = rank_ne; weights[6] = 1; 
-        destinations[7] = rank_nw; weights[7] = 1; 
+        // destinations[4] = rank_se; weights[4] = 1; 
+        // destinations[5] = rank_sw; weights[5] = 1; 
+        // destinations[6] = rank_ne; weights[6] = 1; 
+        // destinations[7] = rank_nw; weights[7] = 1; 
         
-        sources[0] = rank; 
-        weights_s[0] = 2;
-        MPI_Dist_graph_create_adjacent(comm_2d, 1, sources, weights_s, 8, destinations, weights, MPI_INFO_NULL, 0, &comm_graph); 
+        // sources[0] = rank; 
+        // weights_s[0] = 2;
+        MPI_Dist_graph_create_adjacent(comm_2d, 8, destinations, weights , 8, destinations, weights , MPI_INFO_NULL, 0, &comm_graph); 
     }
 
 
-    void CommunicateBorders(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New, int rang, MPI_Comm comm_2d, int r, int c){
+    void CommunicateBorders(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New, int rang, MPI_Comm comm_graph, int r, int c){
         //start comm
         # define mnax(a, b) ((a > b) ? (a) : (b))
         int MAX_DIM = mnax (nx, ny);
@@ -175,17 +179,9 @@ namespace paraleln_solver{
         char *Buffer_se = (char*)malloc(sizeof(char)*9);
         char *Buffer_nw = (char*)malloc(sizeof(char)*9);
         char *Buffer_ne = (char*)malloc(sizeof(char)*9);
-        
-        // find neighbours
-        int rank_n, rank_s, rank_e, rank_w;
-        int rank_ne, rank_nw, rank_se, rank_sw;
-        int displacement=0;
-
-        //create new communicator for the hood architeture
-        MPI_Comm comm_graph;
-        CreateGraphComm(rang,rank_n,rank_s,rank_e,rank_w,rank_ne,rank_nw,rank_se,rank_sw,comm_2d,comm_graph,r,c);
 
         // Prepare data for MPI_Alltoallv
+        int displacement=0;
         int sendcounts[8];  // Number of elements to send to each process
         int recvcounts[8];  // Number of elements to receive from each process
         int sdispls[8];     // Displacements in send buffer
@@ -201,14 +197,15 @@ namespace paraleln_solver{
             Buffer1_w[i-2] = Matrix_Old[i][2];
             Buffer2_w[i-2] = Matrix_Old[i][3];
         }
+        // cout<<"I am rank "<<rang<<" and I send west "<<std::string(Buffer1_w,nx-4)<<".\t"<<std::string(Buffer2_w,nx-4)<<".\n";
         sendcounts[0] = 2*(nx-4);
         recvcounts[0] = 2*(nx-4);
         sdispls[0] = displacement;
         rdispls[0] = displacement;
+        strncpy(Buffer_send + displacement,Buffer1_w,nx-4);
         displacement += nx-4;
-        strcpy(Buffer_send + displacement,Buffer1_w);
+        strncpy(Buffer_send + displacement,Buffer2_w,nx-4);
         displacement += nx-4;
-        strcpy(Buffer_send + displacement,Buffer2_w);
         
         // send south
         // Buffer1 = ROW nx-4 because of ghost layers
@@ -217,13 +214,14 @@ namespace paraleln_solver{
             Buffer1_s[i-2] = Matrix_Old[nx-4][i];
             Buffer2_s[i-2] = Matrix_Old[nx-3][i];
         }
+        // cout<<"I am rank "<<rang<<" and I send south "<<std::string(Buffer1_s,ny-4)<<".\t"<<std::string(Buffer2_s,ny-4)<<".\n";
         sendcounts[1] = 2*(ny-4);
         recvcounts[1] = 2*(ny-4);
         sdispls[1] = displacement;
         rdispls[1] = displacement;
-        strcpy(Buffer_send + displacement,Buffer1_s);
+        strncpy(Buffer_send + displacement,Buffer1_s,ny-4);
         displacement += ny-4;
-        strcpy(Buffer_send + displacement,Buffer2_s);
+        strncpy(Buffer_send + displacement,Buffer2_s,ny-4);
         displacement += ny-4;
 
         // send east
@@ -233,13 +231,14 @@ namespace paraleln_solver{
             Buffer1_e[i-2] = Matrix_Old[i][ny-4];
             Buffer2_e[i-2] = Matrix_Old[i][ny-3];
         }
+        // cout<<"I am rank "<<rang<<" and I send east "<<std::string(Buffer1_e,nx-4)<<".\t"<<std::string(Buffer2_e,nx-4)<<".\n";
         sendcounts[2] = 2*(nx-4);
         recvcounts[2] = 2*(nx-4);
         sdispls[2] = displacement;
         rdispls[2] = displacement;
-        strcpy(Buffer_send + displacement,Buffer1_e);
+        strncpy(Buffer_send + displacement,Buffer1_e,nx-4);
         displacement += nx-4;
-        strcpy(Buffer_send + displacement,Buffer2_e);
+        strncpy(Buffer_send + displacement,Buffer2_e,nx-4);
         displacement += nx-4;
         
         // send north
@@ -249,13 +248,14 @@ namespace paraleln_solver{
             Buffer1_n[i-2] = Matrix_Old[2][i];
             Buffer2_n[i-2] = Matrix_Old[3][i];
         }
+        // cout<<"I am rank "<<rang<<" and I send north "<<std::string(Buffer1_n,ny-4)<<".\t"<<std::string(Buffer2_n,ny-4)<<".\n";
         sendcounts[3] = 2*(ny-4);
         recvcounts[3] = 2*(ny-4);
         sdispls[3] = displacement;
         rdispls[3] = displacement;
-        strcpy(Buffer_send + displacement,Buffer1_n);
+        strncpy(Buffer_send + displacement,Buffer1_n,ny-4);
         displacement += ny-4;
-        strcpy(Buffer_send + displacement,Buffer2_n);
+        strncpy(Buffer_send + displacement,Buffer2_n,ny-4);
         displacement += ny-4;
 
         // send corners
@@ -268,7 +268,8 @@ namespace paraleln_solver{
         recvcounts[4] = 4;
         sdispls[4] = displacement;
         rdispls[4] = displacement;
-        strcpy(Buffer_send + displacement,Buffer_sw);
+        strncpy(Buffer_send + displacement,Buffer_sw,4);
+        // cout<<"I am rank "<<rang<<" and I send sw "<<std::string(Buffer_sw,4)<<".\n";
         displacement += 4;
         // cout<<"preparing to sent south west from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
@@ -281,7 +282,8 @@ namespace paraleln_solver{
         recvcounts[5] = 4;
         sdispls[5] = displacement;
         rdispls[5] = displacement;
-        strcpy(Buffer_send + displacement,Buffer_se);
+        strncpy(Buffer_send + displacement,Buffer_se,4);
+        // cout<<"I am rank "<<rang<<" and I send se "<<std::string(Buffer_se,4)<<".\n";
         displacement += 4;
         // cout<<"preparing to sent south east from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
@@ -294,7 +296,8 @@ namespace paraleln_solver{
         recvcounts[6] = 4;
         sdispls[6] = displacement;
         rdispls[6] = displacement;
-        strcpy(Buffer_send + displacement,Buffer_ne);
+        strncpy(Buffer_send + displacement,Buffer_ne,4);
+        // cout<<"I am rank "<<rang<<" and I send ne "<<std::string(Buffer_ne,4)<<".\n";
         displacement += 4;
         // cout<<"preparing to sent north east from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
@@ -307,14 +310,16 @@ namespace paraleln_solver{
         recvcounts[7] = 4;
         sdispls[7] = displacement;
         rdispls[7] = displacement;
-        strcpy(Buffer_send + displacement,Buffer_nw);
+        strncpy(Buffer_send + displacement,Buffer_nw,4);
+        // cout<<"I am rank "<<rang<<" and I send nw "<<std::string(Buffer_nw,4)<<".\n";
         displacement += 4; // end
+        // cout<<"I am rank "<<rang<<" and I send  "<<std::string(Buffer_send,displacement)<<".\n";
         // cout<<"preparing to sent north west from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
         
-        cout<<"I am rank "<<rang<<" before comm\n";
+        // cout<<"I am rank "<<rang<<" before comm\n";
         // Perform MPI_Alltoallv
         MPI_Neighbor_alltoallv(Buffer_send, sendcounts, sdispls, MPI_CHAR, Buffer_recv, recvcounts, rdispls, MPI_CHAR, comm_graph);
-        cout<<"I am rank "<<rang<<" after comm\n";
+        // cout<<"I am rank "<<rang<<" after comm\n";
         
         
         // recieves start here
@@ -324,6 +329,7 @@ namespace paraleln_solver{
         displacement += nx-4;
         strncpy(Buffer2_w,Buffer_recv + displacement,nx-4);
         displacement += nx-4;
+        // cout<<"I am rank "<<rang<<" and I recv west "<<std::string(Buffer1_w,nx-4)<<".\t"<<std::string(Buffer2_w,nx-4)<<".\n";
         // Buffer1 = Col 0 it is a ghost layers
         // Buffer2 = Col 1 it is a ghost layers
         for (int i = 0; i < nx - 4; i++){
@@ -337,6 +343,7 @@ namespace paraleln_solver{
         displacement += ny-4;
         strncpy(Buffer2_s,Buffer_recv + displacement,ny-4);
         displacement += ny-4;
+        // cout<<"I am rank "<<rang<<" and I recv south "<<std::string(Buffer1_s,ny-4)<<".\t"<<std::string(Buffer2_s,ny-4)<<".\n";
         // Buffer1 = ROW nx-2 it is a ghost layers
         // Buffer2 = ROW nx-1 it is a ghost layers
         for (int i = 0; i < ny - 4; i++){
@@ -350,6 +357,7 @@ namespace paraleln_solver{
         displacement += nx-4;
         strncpy(Buffer2_e,Buffer_recv + displacement,nx-4);
         displacement += nx-4;
+        // cout<<"I am rank "<<rang<<" and I recv east "<<std::string(Buffer1_e,nx-4)<<".\t"<<std::string(Buffer2_e,nx-4)<<".\n";
         // Buffer1 = Col ny-2 it is a ghost layers
         // Buffer2 = Col ny-1 it is a ghost layers
         for (int i = 0; i < nx - 4; i++){
@@ -363,6 +371,7 @@ namespace paraleln_solver{
         displacement += ny-4;
         strncpy(Buffer2_n,Buffer_recv + displacement,ny-4);
         displacement += ny-4;
+        // cout<<"I am rank "<<rang<<" and I recv north "<<std::string(Buffer1_n,ny-4)<<".\t"<<std::string(Buffer2_n,ny-4)<<".\n";
         // Buffer1 = ROW 0 it is a ghost layers
         // Buffer2 = ROW 1 because of ghost layers
         for (int i = 0; i < ny - 4; i++){
@@ -374,6 +383,7 @@ namespace paraleln_solver{
         //recieve corners
         //recieve SW corner
         strncpy(Buffer_sw,Buffer_recv + displacement,size_t(4));
+        // cout<<"I am rank "<<rang<<" and I recv sw "<<std::string(Buffer_sw,4)<<".\n";
         displacement += 4;
         Matrix_Old[nx-2][0] = Buffer_sw[0];
         Matrix_Old[nx-2][1] = Buffer_sw[1]; 
@@ -383,6 +393,7 @@ namespace paraleln_solver{
 
         //recieve SE corner
         strncpy(Buffer_se,Buffer_recv + displacement,size_t(4));
+        // cout<<"I am rank "<<rang<<" and I recv se "<<std::string(Buffer_se,4)<<".\n";
         displacement += 4;
         Matrix_Old[nx-2][ny-2] = Buffer_se[0];
         Matrix_Old[nx-2][ny-1] = Buffer_se[1];
@@ -392,6 +403,7 @@ namespace paraleln_solver{
 
         //recieve NE corner
         strncpy(Buffer_ne,Buffer_recv + displacement,size_t(4));
+        // cout<<"I am rank "<<rang<<" and I recv ne "<<std::string(Buffer_ne,4)<<".\n";
         displacement += 4;
         Matrix_Old[0][ny-2] = Buffer_ne[0];
         Matrix_Old[0][ny-1] = Buffer_ne[1]; 
@@ -401,6 +413,7 @@ namespace paraleln_solver{
 
         //recieve NW corner
         strncpy(Buffer_nw,Buffer_recv + displacement,size_t(4));
+        // cout<<"I am rank "<<rang<<" and I recv nw "<<std::string(Buffer_nw,4)<<".\n";
         displacement += 4;
         Matrix_Old[0][0] = Buffer_nw[0];
         Matrix_Old[0][1] = Buffer_nw[1]; 
@@ -425,16 +438,101 @@ namespace paraleln_solver{
 
     }
 
-    void Iterate(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New, int generations, int rang, MPI_Comm comm_2d, int r, int c){
+    void Iterate(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New, int generations, int rang, MPI_Comm comm_graph, int r, int c){
         for (int generation = 1; generation <= generations; generation++){
             //we first communicate to update the ghost layers for each subdomain after the last iteration
             //also since the ghost layers originally haven't been set in the first iteration we set them 
-            CommunicateBorders (nx,  ny,  Matrix_Old, Matrix_New, rang, comm_2d, r, c);
+            CommunicateBorders (nx,  ny,  Matrix_Old, Matrix_New, rang, comm_graph, r, c);
             // cout << "rank "<<rang<<" communicated\n";
             UpdateMatrix (nx,  ny,  Matrix_Old, Matrix_New);
             // cout << "rank "<<rang<<" updated\n";
             Matrix_Old = Matrix_New;
         }
+    }
+
+        //function that connects all the slices of the processes together in the end (for 2D)
+    void CollectData(Matrix Matrixx, Matrix &result, int rank, int numprocesses, int N, int M, int row_div, int row_mod, int col_div, int col_mod,
+        int r, int c, int N_row, int N_col, MPI_Comm comm_2d){
+        MPI_Status status;
+        // char *Buffer = (char*)malloc(sizeof(char)*(row_div+1)*(col_div+1)); //maximum size that could appear
+
+        //initialize 2d array to hold the received data
+        std::vector<std::vector<Matrix>> data;
+        data.resize(r);
+        for(int i=0;i<r;++i)
+            data[i].resize(c);
+        //collect everything at rank 0
+        if(rank==0){
+            data[0][0] = Matrixx;
+
+            for (int i = 1; i < numprocesses; i++) {
+                std::array<int, 2> rec_coords{ -1, -1 };
+
+                MPI_Cart_coords(comm_2d, i, 2, std::data(rec_coords));
+                std::tuple <int, int> rw_col = GetSubdomainDims(rec_coords, row_div, row_mod, col_div, col_mod);
+                int N_col, N_row;
+                N_col = std::get<0>(rw_col);
+                N_row = std::get<1>(rw_col);
+                char *Buffer = (char*)malloc(sizeof(char)*(N_row)*(N_col)); //maximum size that could appear
+                int size = (N_row-4)*(N_col-4);
+
+                MPI_Recv(Buffer, size, MPI_CHAR, i, 0, comm_2d, &status);
+                // cout<<"recieved from rank "<<i<<" "<<N_row<<" "<<N_col<<" "<<"\n";
+                Matrix recieved;
+                recieved.resize(N_row);
+                for(int j=0;j<N_row;++j)
+                    recieved[j].resize(N_col);
+                //rebuild the matrix of the subdomain without the ghostlayers
+                for (int j = 0; j < N_row-4; j++){
+                    for (int k = 0; k < N_col-4; k++){
+                        recieved[j][k] = Buffer[ (j)*(N_col-4) + (k) ];
+                    }
+                }
+                data[rec_coords[1]][rec_coords[0]] = recieved;
+                // cout<<"recieved into matrix from rank "<<i<<" with size "<<N_row<<" "<<N_col<<" "<<size<<" data\n"<<std::string(Buffer,size)<<".\n";
+                free(Buffer);
+            }
+            // build the final solution
+            int rowoffset = 0;
+            for(int i=0;i<r;i++){ //row of data
+                // cout<<"survived colletion\n";
+                int maxrow = row_div; //number of rows in the current subdomain set
+                if(i<row_mod) maxrow++;
+                for(int j=0;j<maxrow;j++){ //row of recieved
+                    int coloffset = 0;
+                    for(int k=0;k<c;k++){ //column of data
+                        int maxcol = col_div; //number of rows in the current subdomain set
+                        if(k<col_mod) maxcol++;
+                        for(int l=0;l<maxcol;l++){
+                            // cout<<"doing fun ind subdomains of row "<<i<<"and cols "<<k<<" of inner rows "<<j<<" and inner cols"<<l<<"\n";
+                            // cout<<"to be inserted at "<<rowoffset + j<<" "<<coloffset + l<<"\n";
+                            // cout<<"the data is "<< data[i][k][j][l] <<"\n";
+                            // cout<<"finished at "<<i<<" "<<k<<"\t and pos "<<j<<" "<<l<<"\n to be inserted at "<<rowoffset + j<<" "<<coloffset + l<<"\n" ;
+                            // data[i][k][j][l] = '0';
+                            // result[ rowoffset + j ][ coloffset + l ]='0';
+                            result[ rowoffset + j ][ coloffset + l ] = data[i][k][j][l];
+                        }
+                        coloffset+=maxcol;
+                    }
+                }
+                rowoffset+=maxrow;
+            }
+        }
+        else{
+            char *Buffer = (char*)malloc(sizeof(char)*(N_row)*(N_col)); //maximum size that could appear
+            // create a buffer with all the elements of the subdomain without the ghost layers
+            for (int i = 0; i < N_row-4; i++){
+                for (int j = 0; j < N_col-4; j++){
+                    Buffer[ i*(N_col-4) + j ] = Matrixx[i+2][j+2];
+                }
+            }
+            int size = (N_row-4)*(N_col-4);
+            // cout<<"sent from rank "<<rank<<" with size "<<N_row<<" "<<N_col<<" "<<size<<" data\n"<<std::string(Buffer,size)<<".\n";
+            // printf("%.*s \n",size,Buffer);
+            MPI_Send(Buffer,size, MPI_CHAR,0,0,comm_2d);
+            free(Buffer);
+        }
+        // return result;
     }
 
     int paralel_neighbor(program_options::Options opts, int rank, int numprocesses){
@@ -452,6 +550,7 @@ namespace paraleln_solver{
         // int reorder = opts.reorder;
         int reorder = false;
         MPI_Comm comm_2d;
+        MPI_Comm comm_graph;
         MPI_Cart_create(MPI_COMM_WORLD, ndims, std::data(dims), std::data(periods), reorder, &comm_2d);
 
         if(rank == 0){
@@ -483,6 +582,8 @@ namespace paraleln_solver{
         array<int, 2> coord = {-1, -1};    
         MPI_Cart_coords(comm_2d, rank, ndims, std::data(coord));
         // cout<<"I am rang "<<rank<<"and I am at row "<<coord[1]<<" and col "<<coord[0]<<"\n";
+        //create new communicator for the hood architeture
+        CreateGraphComm(rank,comm_2d,comm_graph,r,c);
 
         // number of columns and rows in this subdomain (with added ghost layers)
         std::tuple <int, int> rw_col = GetSubdomainDims(coord, row_div, row_mod, col_div, col_mod);
@@ -507,13 +608,13 @@ namespace paraleln_solver{
         InputGenerator(N_row, N_col, Matrix_Old, Matrix_New);
         cout<<"Generation of the domain "<< rank <<" successfull------------------------------------------------\n";
         
-        Iterate(N_row, N_col, Matrix_Old, Matrix_New, opts.iters, rank, comm_2d,r,c);
+        Iterate(N_row, N_col, Matrix_Old, Matrix_New, opts.iters, rank, comm_graph,r,c);
         cout<<"Iteration of the domain "<< rank <<" successfull------------------------------------------------\n";
         Matrix result;
         result.resize(opts.N);
         for(size_t i=0;i<opts.N;++i)
             result[i].resize(opts.M);
-        // CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
+        CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
         if (rank==0){
             PrintOutput(opts.N, opts.M, result,0);
         }

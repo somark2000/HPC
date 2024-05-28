@@ -455,6 +455,7 @@ namespace paralel_solver{
     int paralel(program_options::Options opts, int rank, int numprocesses){
         // let openMPI take care of splitting into suitable subdomain grid
         int ndims = 2; //2D grid
+        // std::array<int, 2> dims = {1, 12};
         std::array<int, 2> dims = {0, 0};
         MPI_Dims_create(numprocesses, ndims, std::data(dims));
 
