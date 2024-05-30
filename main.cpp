@@ -29,14 +29,14 @@ bool check_prime(int n){
 }
 
 int main(int argc, char **argv) try{
-  //start timer (before MPI Init)
-  auto start1 = std::chrono::system_clock::now();
-
   //MPI start
   MPI_Init(&argc, &argv);
 
   // parse args
   auto opts = program_options::parse(argc, argv);
+  
+  //pre generate the input for all the runs for verification
+  if(opts.verification == 1) sequential_solver::GlobalInputGenerator(opts);
   
   //define each process their rank and the total number of processes
   int rank, num_processes;
@@ -66,20 +66,7 @@ int main(int argc, char **argv) try{
   }
 
   if (rank == 0){
-    cout<<"Paralel terminated\n";
-    auto end1 = std::chrono::system_clock::now();
-    auto runtime1 = std::chrono::duration_cast<std::chrono::milliseconds>(end1 - start1); //runtime with init
-    std::cout << "The program executed in " << runtime1.count() << " milliseconds." << std::endl;
-
-    // //write specs to .txt file
-    // std::ofstream file;
-    // file.open("runtime_data.csv", std::ios::app);
-    // if (!file.is_open()) {
-    //   std::cerr << "File could not be opened!" << std::endl;
-    //   return 1;
-    // }
-    // file << opts.mpi_mode << ", " << opts.N << ", " << num_processes << ", " << runtime1.count() << std::endl;
-    // file.close();
+    cout<<"Solver terminated\n";
   }
   MPI_Finalize();
 }

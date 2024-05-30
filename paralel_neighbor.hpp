@@ -13,6 +13,7 @@
 #include <tuple>
 #include <vector>
 #include <cstdlib>   // for rand()
+#include <sstream>
 
 #include <mpi.h>
 #include "options.hpp"
@@ -46,6 +47,8 @@ namespace paraleln_solver{
         cout<<"for rank "<<rank<<" we have\n";
         cout << contor << " x 1" << endl;
         cout << (nx * ny - contor) << " x 0" << endl;
+        float survival = float(contor)/(nx * ny) ;
+        cout << "survival rate is " << survival <<"\n";
     }
 
     // return number of cols and rows in a subdomain characterized by (cartesian) coordinates
@@ -71,8 +74,28 @@ namespace paraleln_solver{
             }
     }
 
+    void SaveState(int nx, int ny, Matrix M, int iters){
+    //write specs to .txt file
+        ofstream file;
+        ostringstream oss;
+        oss << "parn_" << nx << "x" << ny << "_gen_"<< iters << ".dat";
+        string name = oss.str();
+        // string name = "seq_" + opts.N + "x" + opts.M + "_gen_0.dat";
+        file.open(name);
+        if (!file.is_open()) {
+            std::cerr << "File could not be opened!" << std::endl;
+        }
+
+        for (int i = 0; i < nx; i++){
+            for (int j = 0; j < ny; j++)
+                file << M[i][j];
+            file << '\n';
+        }
+        file.close();
+    }
+
     //an input generator for at least one type of initial configurations
-    void  InputGenerator(int nx, int ny, Matrix &Matrix_Generated, Matrix &Matrix_New, float chance = 0.28){
+    void  InputGenerator(int nx, int ny, Matrix &Matrix_Generated, Matrix &Matrix_New, float chance, int verification, std::array<int, 2> coord, int row_div, int row_mod, int col_div, int col_mod, int iters, int N, int M){
         // we denote the dead cells with char '0' and the alive cells with char '1'
         // using char as it is a byte datatype for the communication part down the road
         // we have to leave empty the ghost layers and later communicate them with their neighbours
@@ -91,14 +114,60 @@ namespace paraleln_solver{
             Matrix_Generated[i][1] = '0';
             Matrix_New[i][0] = '0';
             Matrix_New[i][1] = '0';
-            for (int j = 2; j < ny-2; j++){
-                Matrix_Generated[i][j] = '0' + ( float(rand()) / RAND_MAX <= chance );
-                Matrix_New[i][j] = '0';
-            }
             Matrix_New[i][ny-2] = '0';
             Matrix_New[i][ny-1] = '0';
             Matrix_Generated[i][ny-2] = '0';
             Matrix_Generated[i][ny-1] = '0';
+        }
+
+        if(verification==1){//if there is a need to check the identity, all subdomains can retrieve their own data from the sequential runs initial status
+            //displacements
+            int row_displacement, col_displacement;
+
+            if(coord[1]<=row_mod) row_displacement = (coord[1]) * (row_div+1);
+            else row_displacement = row_mod * (row_div+1) + (coord[1]-row_mod) * row_div;
+            if(coord[0]<=col_mod) col_displacement = (coord[0]) * col_div;
+            else col_displacement = col_mod * (col_div+1) + (coord[0]-col_mod) * col_div;
+
+            //read specs to .txt file
+            ifstream file;
+            ostringstream oss;
+            oss << "seq_" << N << "x" << M << "_gen_"<< iters << ".txt";
+            string name = oss.str();
+            file.open(name);
+            if (!file.is_open()) {
+                std::cerr << "File could not be opened!" << std::endl;
+            }
+            string line;
+            Matrix big;
+            big.resize(N);
+            for(int i=0;i<N;i++) big[i].resize(M);
+            int i=0;
+            int j=0;
+            char c;
+            while (getline(file, line) && i<N){
+                for (int k = 0; k < M; k++){ //do not consider the endl at the end
+                    c = line[k];        
+                    big[i][k] = c;
+                }
+                i++;
+            }
+            // cout<<name<<"\t"<<row_displacement<<"\t"<<col_displacement<<"\t"<<nx<<"\t"<<ny<<"\n";
+            for (i = 0; i < nx-4; i++){
+                for (j = 0; j < ny-4; j++){
+                        // cout<<"in big at "<<i+row_displacement<<" and "<<j+col_displacement<<" is "<<big[i+row_displacement][j+col_displacement]<<"\n";
+                        Matrix_Generated[i+2][j+2] = big[i+row_displacement][j+col_displacement];
+                        Matrix_New[i+2][j+2] = '0';
+                }
+            }
+        }
+        else{ //if there is no need to check the identity, all subdomains can generate their own data
+            for (int i = 2; i < nx-2; i++){
+                for (int j = 2; j < ny-2; j++){
+                        Matrix_Generated[i][j] = '0' + ( float(rand()) / RAND_MAX <= chance );
+                        Matrix_New[i][j] = '0';
+                }
+            }
         }
     }
 
@@ -538,7 +607,52 @@ namespace paraleln_solver{
     int paralel_neighbor(program_options::Options opts, int rank, int numprocesses){
         // let openMPI take care of splitting into suitable subdomain grid
         int ndims = 2; //2D grid
-        std::array<int, 2> dims = {0, 0};
+                std::array<int, 2> dims;
+        int N = opts.N;
+        int M = opts.M;
+        if(opts.scaling == 0) dims = {0, 0};
+        else if(opts.scaling == 1){
+            switch (opts.scaling_config)
+            {
+            case 1:
+                dims = {1, 32};
+                break;
+            case 2:
+                dims = {8, 32};
+                break;
+            case 3:
+                dims = {16, 32};
+                break;
+            case 4:
+                dims = {32, 32};
+                break;
+            }
+        }
+        else if(opts.scaling == 2){
+            switch (opts.scaling_config)
+            {
+            case 1:
+                dims = {1, 32};
+                N = dims[0] * N;
+                M = dims[0] * M;
+                break;
+            case 2:
+                dims = {8, 32};
+                N = dims[0] * N;
+                M = dims[0] * M;
+                break;
+            case 3:
+                dims = {16, 32};
+                N = dims[0] * N;
+                M = dims[0] * M;
+                break;
+            case 4:
+                dims = {32, 32};
+                N = dims[0] * N;
+                M = dims[0] * M;
+                break;
+            }
+        }
         MPI_Dims_create(numprocesses, ndims, std::data(dims));
 
         int r = dims[1]; //number or row-subdomain the domain was split
@@ -547,8 +661,8 @@ namespace paraleln_solver{
 
         //create cartesian virtual geometry
         std::array<int, 2> periods = {true, true}; // periodic topology
-        // int reorder = opts.reorder;
-        int reorder = false;
+        // int reorder = false;
+        int reorder = (int) opts.reorder;
         MPI_Comm comm_2d;
         MPI_Comm comm_graph;
         MPI_Cart_create(MPI_COMM_WORLD, ndims, std::data(dims), std::data(periods), reorder, &comm_2d);
@@ -595,7 +709,8 @@ namespace paraleln_solver{
         if(rank == 0){
             opts.print();
         }
-
+        // time measurement points
+        double starttime, endtime, runtime;
         //generating the setup for current subdomain
         Matrix Matrix_New, Matrix_Old;
         Matrix_Old.resize(N_row);
@@ -605,17 +720,26 @@ namespace paraleln_solver{
             Matrix_New[i].resize(N_col);
             Matrix_Old[i].resize(N_col);
         }
-        InputGenerator(N_row, N_col, Matrix_Old, Matrix_New);
+        InputGenerator(N_row, N_col, Matrix_Old, Matrix_New, opts.chance, opts.verification, coord, row_div, row_mod, col_div, col_mod, -1, N, M);
         cout<<"Generation of the domain "<< rank <<" successfull------------------------------------------------\n";
         
+        MPI_Barrier(comm_graph);
+        // start timer
+        starttime = MPI_Wtime();
         Iterate(N_row, N_col, Matrix_Old, Matrix_New, opts.iters, rank, comm_graph,r,c);
         cout<<"Iteration of the domain "<< rank <<" successfull------------------------------------------------\n";
+        // end timer
+        endtime = MPI_Wtime();
+        runtime = (endtime-starttime)*1000000; //runtime transformed in microseconds
+        cout << "The parallel-hood program executed for rank "<<rank<<" in " << runtime << " microseconds.\n";
+
         Matrix result;
         result.resize(opts.N);
         for(size_t i=0;i<opts.N;++i)
             result[i].resize(opts.M);
         CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
         if (rank==0){
+            SaveState(opts.N, opts.M, result, opts.iters);
             PrintOutput(opts.N, opts.M, result,0);
         }
 

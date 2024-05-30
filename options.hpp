@@ -23,10 +23,11 @@ namespace program_options {
     size_t N;
     size_t M;
     size_t iters;
-    // unsigned int reorder;
-    // unsigned int scaling;
-    // float chance;
-    // unsigned int verification;
+    int reorder;
+    int scaling;
+    unsigned int scaling_config;
+    float chance;
+    int verification;
 
     void print() const {
       std::printf("mpi_mode: %u\n", mpi_mode);    
@@ -34,15 +35,16 @@ namespace program_options {
       std::printf("N: %zu\n", N);
       std::printf("M: %zu\n", M);
       std::printf("iters: %zu\n", iters);
-    //   std::printf("reoder: %u\n", reorder);
-    //   std::printf("scaling: %u\n", scaling);
-    //   std::printf("chance of alive: %u\n", chance);
-    //   std::printf("verification: %u\n", verification);
+      std::printf("reoder: %u\n", reorder);
+      std::printf("scaling: %u\n", scaling);
+      std::printf("scaling_config: %u\n", scaling_config);
+      std::printf("chance of alive: %f\n", chance);
+      std::printf("verification: %u\n", verification);
     }
   };
 
   auto parse(int argc, char *argv[]) {
-    if (argc != 6)
+    if (argc != 11)
       throw std::runtime_error("unexpected number of arguments");
     Options opts;
     if (std::string(argv[1]) == std::string("seq"))
@@ -60,24 +62,29 @@ namespace program_options {
       throw std::runtime_error("invalid parameter for M");
     if (std::sscanf(argv[5], "%zu", &opts.iters) != 1 && opts.iters != 0)
       throw std::runtime_error("invalid parameter for iters");
-    // if (std::sscanf(argv[6], "%u", &opts.reorder) != 1 && opts.reorder != 0)
-    //     throw std::runtime_error("invalid parameter for reorder flag (valid are 0 and 1) and recieved");
-    // if (std::string(argv[7]) == std::string("off"))
-    //   opts.scaling = 0;
-    // else if( std::string(argv[7]) == std::string("strong"))
-    //   opts.scaling = 1;
-    // else if( std::string(argv[7]) == std::string("weak"))
-    //   opts.scaling = 2;
-    // else
-    // throw std::runtime_error("invalid parameter for scaling (valid are 'off', 'strong' and 'weak')");
-    // if (std::sscanf(argv[8], "%zu", &opts.chance) > 1 && opts.chance < 0)
-    //   throw std::runtime_error("invalid parameter for chance of alive");
-    // if (std::string(argv[9]) == std::string("off"))
-    //   opts.verification = 0;
-    // else if( std::string(argv[9]) == std::string("on"))
-    //   opts.verification = 1;
-    // else
-    // throw std::runtime_error("invalid parameter for verification (valid are 'off' and 'on')");
+    if (std::string(argv[6]) == std::string("false"))
+      opts.reorder = 0;
+    else if( std::string(argv[6]) == std::string("true"))
+      opts.reorder = 1;
+    else throw std::runtime_error("invalid parameter for reorder flag (valid are true and false)");
+    if (std::string(argv[7]) == std::string("off"))
+      opts.scaling = 0;
+    else if( std::string(argv[7]) == std::string("strong"))
+      opts.scaling = 1;
+    else if( std::string(argv[7]) == std::string("weak"))
+      opts.scaling = 2;
+    else
+    throw std::runtime_error("invalid parameter for scaling (valid are 'off', 'strong' and 'weak')");
+    if (std::sscanf(argv[8], "%u", &opts.scaling_config) != 1 && opts.scaling_config >= 0 && opts.scaling_config < 5)
+      throw std::runtime_error("invalid parameter for scaling_config");
+    if (std::sscanf(argv[9], "%f", &opts.chance) > 1 && opts.chance < 0)
+      throw std::runtime_error("invalid parameter for chance of alive");
+    if (std::string(argv[10]) == std::string("off"))
+      opts.verification = 0;
+    else if( std::string(argv[10]) == std::string("on"))
+      opts.verification = 1;
+    else
+    throw std::runtime_error("invalid parameter for verification (valid are 'off' and 'on')");
     return opts;
   }
 
