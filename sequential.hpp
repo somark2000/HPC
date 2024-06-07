@@ -36,10 +36,11 @@ namespace sequential_solver{
         return '0' + survive;
     }
 
-    void UpdateMatrix(int nx, int ny, Matrix &Matric_Old, Matrix &Matrix_New){
+    void UpdateMatrix(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New){
+        Matrix_New = Matrix_Old;
         for (int i = 2; i < nx-2; i++)
             for (int j = 2; j < ny-2; j++){
-                Matrix_New[i][j] = Stensil(nx, ny, Matric_Old, i, j);
+                Matrix_New[i][j] = Stensil(nx, ny, Matrix_Old, i, j);
             }
     }
 
@@ -60,14 +61,17 @@ namespace sequential_solver{
         Matrix_Old[0][1] = Matrix_Old[nx-4][ny-3];
         Matrix_Old[1][0] = Matrix_Old[nx-3][ny-4];
         Matrix_Old[1][1] = Matrix_Old[nx-3][ny-3];
+        
         Matrix_Old[0][ny-2] = Matrix_Old[nx-4][2];
         Matrix_Old[0][ny-1] = Matrix_Old[nx-4][3];
         Matrix_Old[1][ny-2] = Matrix_Old[nx-3][2];
         Matrix_Old[1][ny-1] = Matrix_Old[nx-3][3];
+
         Matrix_Old[nx-2][0] = Matrix_Old[2][ny-4];
         Matrix_Old[nx-2][1] = Matrix_Old[2][ny-3];
         Matrix_Old[nx-1][0] = Matrix_Old[3][ny-4];
         Matrix_Old[nx-1][1] = Matrix_Old[3][ny-3];
+
         Matrix_Old[nx-2][ny-2] = Matrix_Old[2][2];
         Matrix_Old[nx-2][ny-1] = Matrix_Old[2][3];
         Matrix_Old[nx-1][ny-2] = Matrix_Old[3][2];
@@ -83,13 +87,37 @@ namespace sequential_solver{
     }
 
     //an input generator for at least one type of initial configurations
-    void InputGenerator(int nx, int ny, Matrix &Matrix_Generated, Matrix &Matrix_New, float chance){
+    void InputGenerator(int nx, int ny, Matrix &Matrix_Generated, Matrix &Matrix_New, float chance, int verification){
         // we denote the dead cells with char '0' and the alive cells with char '1'
         // using char as it is a byte datatype for the communication part down the road
-        for (int i = 2; i < nx-2; i++){
-            for (int j = 2; j < ny-2; j++){
-                Matrix_Generated[i][j] = '0' + ( float(rand()) / RAND_MAX <= chance );
-                Matrix_New[i][j] = '0';
+        if(verification==1){
+            //read specs to .txt file
+            ifstream file;
+            ostringstream oss;
+            oss << "seq_" << nx-4 << "x" << ny-4 << "_gen_-1.txt";
+            string name = oss.str();
+            file.open(name);
+            if (!file.is_open()) {
+                std::cerr << "File could not be opened!" << std::endl;
+            }
+            string line;
+            int i=0;
+            char c;
+            while (getline(file, line) && i<nx-4){
+                for (int k = 0; k < ny-4; k++){ //do not consider the endl at the end
+                    c = line[k];        
+                    Matrix_Generated[i+2][k+2] = c;
+                    Matrix_New[i+2][k+2] = '0';
+                }
+                i++;
+            }
+        }
+        else{
+            for (int i = 2; i < nx-2; i++){
+                for (int j = 2; j < ny-2; j++){
+                    Matrix_Generated[i][j] = '0' + ( float(rand()) / RAND_MAX <= chance );
+                    Matrix_New[i][j] = '0';
+                }
             }
         }
     }
@@ -109,15 +137,15 @@ namespace sequential_solver{
         //write specs to .txt file
         ofstream file;
         ostringstream oss;
-        oss << "seq_" << nx << "x" << ny << "_gen_"<< iters << ".txt";
+        oss << "seq_" << nx-4 << "x" << ny-4 << "_gen_"<< iters << ".txt";
         string name = oss.str();
         file.open(name);
         if (!file.is_open()) {
             std::cerr << "File could not be opened!" << std::endl;
         }
 
-        for (int i = 0; i < nx; i++){
-            for (int j = 0; j < ny; j++)
+        for (int i = 0; i < nx-4; i++){
+            for (int j = 0; j < ny-4; j++)
                 file << M[i+2][j+2];
             file << '\n';
         }
@@ -125,17 +153,29 @@ namespace sequential_solver{
     }
 
     void GlobalInputGenerator(program_options::Options opts){
-        Matrix Matrix_Old;
-        Matrix_Old.resize(opts.N+4);
-        for(size_t i=0;i<opts.N+4;++i){
-            Matrix_Old[i].resize(opts.M+4);
-        }
-        for (size_t i = 0; i < opts.M; i++){
-            for (size_t j = 0; j < opts.M; j++){
-                Matrix_Old[i][j] = '0' + ( float(rand()) / RAND_MAX <= opts.chance );
+        //read specs to .txt file
+        ifstream file;
+        ostringstream oss;
+        oss << "seq_" << opts.N << "x" << opts.M << "_gen_-1.txt";
+        string name = oss.str();
+        file.open(name);
+        if (!file.is_open()) {
+            Matrix Matrix_Old;
+            Matrix_Old.resize(opts.N+4);
+            for(size_t i=0;i<opts.N+4;++i){
+                Matrix_Old[i].resize(opts.M+4);
             }
+            for (size_t i = 0; i < opts.N+4; i++){
+                for (size_t j = 0; j < opts.M+4; j++){
+                    if( i > 1 and i < opts.N + 2 and j > 1 and j < opts.M + 2)
+                    Matrix_Old[i][j] = '0' + ( float(rand()) / RAND_MAX <= opts.chance );
+                    else
+                    Matrix_Old[i][j] = '0';
+                }
+            }
+            SaveState(opts.N+4,opts.M+4,Matrix_Old,-1);
         }
-        SaveState(opts.N,opts.M,Matrix_Old,-1);
+        
     }
 
     int sequential(program_options::Options opts){
@@ -149,11 +189,11 @@ namespace sequential_solver{
             Matrix_Old[i].resize(opts.M+4);
         }
         cout<<"Sequential solver started----------------------------------------------------\n";
-        InputGenerator(opts.N+4, opts.M+4, Matrix_Old, Matrix_New,opts.chance);
+        InputGenerator(opts.N+4, opts.M+4, Matrix_Old, Matrix_New,opts.chance,opts.verification);
         cout<<"Input generation finished----------------------------------------------------\n";
 
         //saving initial state
-        if(opts.verification==true) SaveState(opts.N,opts.M,Matrix_Old,0);
+        if(opts.verification==true) SaveState(opts.N+4,opts.M+4,Matrix_Old,0);
         
         // start timer
         starttime = MPI_Wtime();
@@ -174,7 +214,7 @@ namespace sequential_solver{
         file << "The sequential program executed in " << runtime << " microseconds.\n";
 
         //saving final state
-        if(opts.verification==true) SaveState(opts.N,opts.M,Matrix_Old,opts.iters);
+        if(opts.verification==true) SaveState(opts.N+4,opts.M+4,Matrix_Old,opts.iters);
         PrintOutput(opts.N, opts.M, Matrix_New);
         return 0;
     }

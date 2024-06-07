@@ -186,28 +186,37 @@ namespace paraleln_solver{
         //find corner neighbors
         array<int, 2> coord_corner = {-1, -1};
         coord_corner = {coord[0]-1, coord[1]+1};
+        
+        coord_corner[0] = coord[0]+1;
+        coord_corner[1] = coord[1]-1;
         if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
         if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_sw);
-        coord_corner = {coord[0]+1, coord[1]+1};
+
+        coord_corner[0] = coord[0]+1;
+        coord_corner[1] = coord[1]+1;
         if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
         if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_se);
-        coord_corner = {coord[0]+1, coord[1]-1};
+        
+        coord_corner[0] = coord[0]-1;
+        coord_corner[1] = coord[1]+1;
         if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
         if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_ne);
-        coord_corner = {coord[0]-1, coord[1]-1};
+        
+        coord_corner[0] = coord[0]-1;
+        coord_corner[1] = coord[1]-1;
         if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
         if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
         MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_nw);
         // cout<<"I am rank "<<rank<<" and my friends are "<<rank_w<<" "<<rank_s<<" "<<rank_e<<" "<<rank_n<<" "<<rank_se<<" "<<rank_sw<<" "<<rank_ne<<" "<<rank_nw<<"\n";
         //create new communicator
@@ -731,7 +740,23 @@ namespace paraleln_solver{
         // end timer
         endtime = MPI_Wtime();
         runtime = (endtime-starttime)*1000000; //runtime transformed in microseconds
-        cout << "The parallel-hood program executed for rank "<<rank<<" in " << runtime << " microseconds.\n";
+        // cout << "The parallel-hood program executed for rank "<<rank<<" in " << runtime << " microseconds.\n";
+
+        // Each MPI process sends its rank to reduction, root MPI process collects the result
+        double reduction_result = 0.0;
+        MPI_Reduce(&runtime, &reduction_result, 1, MPI_DOUBLE, MPI_MAX, 0, comm_2d);
+    
+        if(rank == 0)
+        {
+            printf("The parallel-hood program executed in %f microseconds.\n", reduction_result);
+             //write specs to .txt file
+            ofstream file;
+            ostringstream oss;
+            oss << "parn_" << opts.N << "x" << opts.M << "_times.dat";
+            string name = oss.str();
+            file.open(name,ios::app);
+            file << "The parallel-hood program executed in " << runtime << " microseconds.\n";
+        }
 
         Matrix result;
         result.resize(opts.N);

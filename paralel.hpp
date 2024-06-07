@@ -32,7 +32,9 @@ namespace paralel_solver{
         // cout<<"sum="<<sum<<"\n";
         sum -= (8 * '0'); // char -> int
         // first term is if the cell is alive and second term is if it is dead -> end result will determine whether the cell will be alive or not
-        int survive = (M[i][j]-'0')*(sum==2 || sum==3) + ('1'-M[i][j])*(sum==3);
+        int survive = 0;
+        if(M[i][j] == '1' and (sum==2 || sum==3)) survive = 1;
+        else if(M[i][j] == '0' and sum==3) survive = 1;
         // cout<<"sunt in stensil\t survive="<<survive<<"\t sum="<<sum<<"\n";
         return '0' + survive;
     }
@@ -66,10 +68,31 @@ namespace paralel_solver{
     }
 
     void UpdateMatrix(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New){
+        Matrix_New = Matrix_Old;
         for (int i = 2; i < nx-2; i++)
             for (int j = 2; j < ny-2; j++){
                 Matrix_New[i][j] = Stensil(nx, ny, Matrix_Old, i, j);
             }
+    }
+
+    void SaveState(int nx, int ny, Matrix M, int iters, int rank){
+    //write specs to .txt file
+        ofstream file;
+        ostringstream oss;
+        oss << "par_" << nx << "x" << ny << "_gen_"<< iters <<"_"<<rank<< ".txt";
+        string name = oss.str();
+        // string name = "seq_" + opts.N + "x" + opts.M + "_gen_0.dat";
+        file.open(name);
+        if (!file.is_open()) {
+            std::cerr << "File could not be opened!" << std::endl;
+        }
+
+        for (int i = 0; i < nx; i++){
+            for (int j = 0; j < ny; j++)
+                file << M[i][j];
+            file << '\n';
+        }
+        file.close();
     }
 
     void CommunicateBorders(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New, int rang, MPI_Comm comm_2d, int r, int c){
@@ -91,9 +114,6 @@ namespace paralel_solver{
         int rank_n, rank_s, rank_e, rank_w;
         MPI_Cart_shift(comm_2d, 1, 1, &rank_n, &rank_s); //dir 1 is Y
         MPI_Cart_shift(comm_2d, 0, 1, &rank_w, &rank_e); //dir 0 is X
-        //find corner neighbours
-        int rank_ne, rank_nw, rank_se, rank_sw;
-        array<int, 2> coord_corner = {-1, -1};
 
         // cout<<"I am rang "<<rang<<" and my neighbeours N S E W are:"<< rank_n<<" "<<rank_s<<" "<< rank_e<<" "<<rank_w<<"\n";
         
@@ -123,7 +143,7 @@ namespace paralel_solver{
         dest = rank_s;
         MPI_Send(Buffer1_s, ny-4, MPI_CHAR, dest, 0, comm_2d);
         MPI_Send(Buffer2_s, ny-4, MPI_CHAR, dest, 0, comm_2d);
-        // cout<<"sent south from "<< rang <<" to "<<dest<<"\n";
+        // cout<<"sent south from "<< rang <<" to "<<dest<<"\t"<<string(Buffer1_s)<<" | "<<string(Buffer2_s)<<"\n";
 
         // send east
         // Buffer1 = Col ny-4 because of ghost layers
@@ -149,7 +169,7 @@ namespace paralel_solver{
         dest = rank_n;
         MPI_Send(Buffer1_n, ny-4, MPI_CHAR, dest, 0, comm_2d);
         MPI_Send(Buffer2_n, ny-4, MPI_CHAR, dest, 0, comm_2d);
-        // cout<<"sent north from "<< rang <<" to "<<dest<<"\n";
+        // cout<<"sent north from "<< rang <<" to "<<dest<<"\t"<<string(Buffer1_n)<<" | "<<string(Buffer2_n)<<"\n";
 
         // recieves start here
 
@@ -169,7 +189,16 @@ namespace paralel_solver{
         source = rank_s;
         MPI_Recv(Buffer1_s, ny-4, MPI_CHAR, source, 0, comm_2d, &status1);
         MPI_Recv(Buffer2_s, ny-4, MPI_CHAR, source, 0, comm_2d, &status2);
+        cout<<"recv from south "<< source <<" to "<<rang<<"\t"<<string(Buffer1_s)<<" | "<<string(Buffer2_s)<<"\n";
         // Buffer1 = ROW nx-2 it is a ghost layers
+        // vector<char> V1 = Matrix_Old[nx-2];
+        // vector<char> V2 = Matrix_Old[nx-1];
+        // cout<<"inlocuiesc de la "<< source <<" la "<<rang<<"\t";
+        // for(char i : V1) cout<<i;
+        // cout<<" | "<<string(Buffer1_s)<<"\n";
+        // cout<<"inlocuiesc de la "<< source <<" la "<<rang<<"\t";
+        // for(char i : V2) cout<<i;
+        // cout<<" | "<<string(Buffer2_s)<<"\n";
         for (int i = 0; i < ny - 4; i++){
             // cout<<"\t recieve south\t"<<i<<" "<<nx-1<<"\n";
             Matrix_Old[nx-2][i+2] = Buffer1_s[i];
@@ -195,6 +224,7 @@ namespace paralel_solver{
         source = rank_n;
         MPI_Recv(Buffer1_n, ny-4, MPI_CHAR, source, 0, comm_2d, &status1);
         MPI_Recv(Buffer2_n, ny-4, MPI_CHAR, source, 0, comm_2d, &status2);
+        // cout<<"recv from north "<< source <<" to "<<rang<<"\t"<<string(Buffer1_n)<<" | "<<string(Buffer2_n)<<"\n";
         // Buffer1 = ROW 0 it is a ghost layers
         for (int i = 0; i < ny - 4; i++)
             Matrix_Old[0][i+2] = Buffer1_n[i];
@@ -209,17 +239,49 @@ namespace paralel_solver{
         char *Buffer_se = (char*)malloc(sizeof(char)*4);
         char *Buffer_nw = (char*)malloc(sizeof(char)*4);
         char *Buffer_ne = (char*)malloc(sizeof(char)*4);
+        
         //coordinates of rank in virtual topology
         array<int, 2> coord = {-1, -1};    
         MPI_Cart_coords(comm_2d, rang, 2, std::data(coord));
+
+        //find corner neighbours
+        int rank_ne, rank_nw, rank_se, rank_sw;
+        array<int, 2> coord_corner = {-1, -1};
+
+        coord_corner[0] = coord[0]+1;
+        coord_corner[1] = coord[1]-1;
+        if(coord_corner[0] < 0) coord_corner[0]+=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
+        if(coord_corner[1] < 0) coord_corner[1]+=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
+        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_sw);
+
+        coord_corner[0] = coord[0]+1;
+        coord_corner[1] = coord[1]+1;
+        if(coord_corner[0] < 0) coord_corner[0]+=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
+        if(coord_corner[1] < 0) coord_corner[1]+=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
+        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_se);
+        
+        coord_corner[0] = coord[0]-1;
+        coord_corner[1] = coord[1]+1;
+        if(coord_corner[0] < 0) coord_corner[0]+=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
+        if(coord_corner[1] < 0) coord_corner[1]+=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
+        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_ne);
+        
+        coord_corner[0] = coord[0]-1;
+        coord_corner[1] = coord[1]-1;
+        if(coord_corner[0] < 0) coord_corner[0]+=c;
+        else if (coord_corner[0] >= c) coord_corner[0]-=c;
+        if(coord_corner[1] < 0) coord_corner[1]+=r;
+        else if (coord_corner[1] >= r) coord_corner[1]-=r;
+        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_nw);
         
         //send SW corner
-        coord_corner = {coord[0]-1, coord[1]+1};
-        if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
-        if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
-        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_sw);
+        // dest = rank_ne;
         dest = rank_sw;
         // cout<<"preparing to sent south west from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
         Buffer_sw[0] = Matrix_Old[nx-4][2];
@@ -229,12 +291,7 @@ namespace paralel_solver{
         MPI_Send(Buffer_sw, 4, MPI_CHAR, dest, 0, comm_2d);
 
         //send SE corner
-        coord_corner = {coord[0]+1, coord[1]+1};
-        if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
-        if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
-        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_se);
+        // dest = rank_nw;
         dest = rank_se;
         // cout<<"preparing to sent south east from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
         Buffer_se[0] = Matrix_Old[nx-4][ny-4];
@@ -244,12 +301,7 @@ namespace paralel_solver{
         MPI_Send(Buffer_se, 4, MPI_CHAR, dest, 0, comm_2d);
 
         //send NE corner
-        coord_corner = {coord[0]+1, coord[1]-1};
-        if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
-        if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
-        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_ne);
+        // dest = rank_sw;
         dest = rank_ne;
         Buffer_ne[0] = Matrix_Old[2][ny-4];
         Buffer_ne[1] = Matrix_Old[2][ny-3]; 
@@ -259,12 +311,7 @@ namespace paralel_solver{
         // cout<<"preparing to sent north east from "<< rang<< " to "<<dest<<" with coord_corner col: "<<coord_corner[0]<<" and row: "<<coord_corner[1]<<"\n";
 
         //send NW corner
-        coord_corner = {coord[0]-1, coord[1]-1};
-        if(coord_corner[0] < 0) coord_corner[0]+=c;
-        else if (coord_corner[0] > c) coord_corner[0]-=c;
-        if(coord_corner[1] < 0) coord_corner[1]+=r;
-        else if (coord_corner[1] > r) coord_corner[1]-=r;
-        MPI_Cart_rank(comm_2d, std::data(coord_corner), &rank_nw);
+        // dest = rank_se;
         dest = rank_nw;
         Buffer_nw[0] = Matrix_Old[2][2];
         Buffer_nw[1] = Matrix_Old[2][3]; 
@@ -276,6 +323,7 @@ namespace paralel_solver{
         //recieve corners
         
         //recieve SW corner
+        // source = rank_ne;
         source = rank_sw;
         MPI_Recv(Buffer_sw, 4, MPI_CHAR, source, 0, comm_2d, &status1);
         Matrix_Old[nx-2][0] = Buffer_sw[0];
@@ -285,6 +333,7 @@ namespace paralel_solver{
         // cout<<"recieved to corner SW from "<<source<<" to "<<rang<<"\n";
 
         //recieve SE corner
+        // source = rank_nw;
         source = rank_se;
         MPI_Recv(Buffer_se, 4, MPI_CHAR, source, 0, comm_2d, &status1);
         Matrix_Old[nx-2][ny-2] = Buffer_se[0];
@@ -294,6 +343,7 @@ namespace paralel_solver{
         // cout<<"recieved to corner SE from "<<source<<" to "<<rang<<"\n";
 
         //recieve NE corner
+        // source = rank_sw;
         source = rank_ne;
         MPI_Recv(Buffer_ne, 4, MPI_CHAR, source, 0, comm_2d, &status1);
         Matrix_Old[0][ny-2] = Buffer_ne[0];
@@ -303,6 +353,7 @@ namespace paralel_solver{
         // cout<<"recieved to corner NE from "<<source<<" to "<<rang<<"\n";
 
         //recieve NW corner
+        // source = rank_se;
         source = rank_nw;
         MPI_Recv(Buffer_nw, 4, MPI_CHAR, source, 0, comm_2d, &status1);
         Matrix_Old[0][0] = Buffer_nw[0];
@@ -331,10 +382,12 @@ namespace paralel_solver{
     void Iterate(int nx, int ny, Matrix &Matrix_Old, Matrix &Matrix_New, int generations, int rang, MPI_Comm comm_2d, int r, int c){
         for (int generation = 1; generation <= generations; generation++){
             //we first communicate to update the ghost layers for each subdomain after the last iteration
-            //also since the ghost layers originally haven't been set in the first iteration we set them 
+            //also since the ghost layers originally haven't been set in the first iteration we set them
             CommunicateBorders (nx,  ny,  Matrix_Old, Matrix_New, rang, comm_2d, r, c);
+            // SaveState(nx, ny, Matrix_Old, 0,rang); 
             // cout << "rank "<<rang<<" communicated\n";
             UpdateMatrix (nx,  ny,  Matrix_Old, Matrix_New);
+            // SaveState(nx, ny, Matrix_Old, 1,rang);
             // cout << "rank "<<rang<<" updated\n";
             Matrix_Old = Matrix_New;
         }
@@ -430,7 +483,17 @@ namespace paralel_solver{
             data[i].resize(c);
         //collect everything at rank 0
         if(rank==0){
-            data[0][0] = Matrixx;
+            Matrix recieved;
+            recieved.resize(N_row);
+            for(int j=0;j<N_row;++j)
+                recieved[j].resize(N_col);
+            //rebuild the matrix of the subdomain without the ghostlayers
+            for (int j = 0; j < N_row-4; j++){
+                for (int k = 0; k < N_col-4; k++){
+                    recieved[j][k] = Matrixx[j+2][k+2];
+                }
+            }
+            data[0][0] = recieved;
 
             for (int i = 1; i < numprocesses; i++) {
                 std::array<int, 2> rec_coords{ -1, -1 };
@@ -456,13 +519,12 @@ namespace paralel_solver{
                     }
                 }
                 data[rec_coords[1]][rec_coords[0]] = recieved;
-                // cout<<"recieved into matrix from rank "<<i<<" with size "<<N_row<<" "<<N_col<<" "<<size<<" data\n"<<std::string(Buffer,size)<<".\n";
+                // cout<<"recieved into matrix from rank "<<i<<" to position "<<rec_coords[1]<<" "<<rec_coords[0]<<" with size "<<N_row<<" "<<N_col<<" "<<size<<" data\n"<<std::string(Buffer,size)<<".\n";
                 free(Buffer);
             }
             // build the final solution
             int rowoffset = 0;
-            for(int i=0;i<r;i++){ //row of data
-                // cout<<"survived colletion\n";
+            for(int i=0; i<r; i++){ //row of data
                 int maxrow = row_div; //number of rows in the current subdomain set
                 if(i<row_mod) maxrow++;
                 for(int j=0;j<maxrow;j++){ //row of recieved
@@ -502,26 +564,6 @@ namespace paralel_solver{
         // return result;
     }
 
-    void SaveState(int nx, int ny, Matrix M, int iters){
-    //write specs to .txt file
-        ofstream file;
-        ostringstream oss;
-        oss << "par_" << nx << "x" << ny << "_gen_"<< iters << ".txt";
-        string name = oss.str();
-        // string name = "seq_" + opts.N + "x" + opts.M + "_gen_0.dat";
-        file.open(name);
-        if (!file.is_open()) {
-            std::cerr << "File could not be opened!" << std::endl;
-        }
-
-        for (int i = 0; i < nx; i++){
-            for (int j = 0; j < ny; j++)
-                file << M[i][j];
-            file << '\n';
-        }
-        file.close();
-    }
-
     int paralel(program_options::Options opts, int rank, int numprocesses){
         // let openMPI take care of splitting into suitable subdomain grid
         int ndims = 2; //2D grid
@@ -552,22 +594,22 @@ namespace paralel_solver{
             {
             case 1:
                 dims = {1, 32};
-                N = dims[0] * N;
+                N = dims[1] * N;
                 M = dims[0] * M;
                 break;
             case 2:
                 dims = {8, 32};
-                N = dims[0] * N;
+                N = dims[1] * N;
                 M = dims[0] * M;
                 break;
             case 3:
                 dims = {16, 32};
-                N = dims[0] * N;
+                N = dims[1] * N;
                 M = dims[0] * M;
                 break;
             case 4:
                 dims = {32, 32};
-                N = dims[0] * N;
+                N = dims[1] * N;
                 M = dims[0] * M;
                 break;
             }
@@ -643,20 +685,38 @@ namespace paralel_solver{
         MPI_Barrier(comm_2d);
         // start timer
         starttime = MPI_Wtime();
+        // SaveState(N_row, N_col, Matrix_Old, 0,rank);
         Iterate(N_row, N_col, Matrix_Old, Matrix_New, opts.iters, rank, comm_2d,r,c);
+        // SaveState(N_row, N_col, Matrix_Old, 1,rank);
         cout<<"Iteration of the domain "<< rank <<" successfull------------------------------------------------" << std::endl;
         // end timer
         endtime = MPI_Wtime();
         runtime = (endtime-starttime)*1000000; //runtime transformed in microseconds
-        cout << "The parallel program executed for rank "<<rank<<" in " << runtime << " microseconds.\n";
+        // cout << "The parallel program executed for rank "<<rank<<" in " << runtime << " microseconds.\n";
+
+        // Each MPI process sends its rank to reduction, root MPI process collects the result
+        double reduction_result = 0.0;
+        MPI_Reduce(&runtime, &reduction_result, 1, MPI_DOUBLE, MPI_MAX, 0, comm_2d);
+    
+        if(rank == 0)
+        {
+            printf("The parallel-hood program executed in %f microseconds\n", reduction_result);
+            //write specs to .txt file
+            ofstream file;
+            ostringstream oss;
+            oss << "par_" << opts.N << "x" << opts.M << "_times.dat";
+            string name = oss.str();
+            file.open(name,ios::app);
+            file << "The parallel program executed in " << runtime << " microseconds.\n";
+        }
 
         Matrix result;
         result.resize(opts.N);
         for(size_t i=0;i<opts.N;++i)
             result[i].resize(opts.M);
-        CollectData(Matrix_New,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
+        CollectData(Matrix_Old,result,rank,numprocesses,opts.N,opts.N,row_div,row_mod,col_div,col_mod,r,c,N_row,N_col,comm_2d);
         if (rank==0){
-            SaveState(opts.N, opts.M, result, opts.iters);
+            SaveState(opts.N, opts.M, result, opts.iters,0);
             PrintOutput(opts.N, opts.M, result,0);
         }
 
